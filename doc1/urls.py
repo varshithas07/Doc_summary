@@ -7,4 +7,10 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('', views.home, name='home'),
 path('doc/', views.doc_view, name='doc'),
-path('split_pdf/', views.split_pdf, name='split_pdf'),]
+  # URL pattern for the doc_view view
+    path('process_file/', views.process_file, name='process_file'),
+path('doc_chat/', views.doc_chat, name='doc_chat')
+
+
+]
+# path('split_pdf/', views.split_pdf, name='split_pdf'),]
