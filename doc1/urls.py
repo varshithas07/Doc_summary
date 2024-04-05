@@ -5,5 +5,6 @@ from doc1 import views
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('home/', views.home, name='home'),
-path('doc/', views.doc_view, name='doc'),]
+    path('', views.home, name='home'),
+path('doc/', views.doc_view, name='doc'),
+path('split_pdf/', views.split_pdf, name='split_pdf'),]
