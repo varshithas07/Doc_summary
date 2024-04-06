@@ -1,13 +1,20 @@
 from django.shortcuts import render, redirect
+from django.urls import reverse
 from llama_index.core import SimpleDirectoryReader, get_response_synthesizer
 from llama_index.core import DocumentSummaryIndex
-# from llama_index.llms.openai import OpenAI
+from langchain.embeddings import HuggingFaceEmbeddings
+from llama_index.embeddings.langchain import LangchainEmbedding
 from llama_index.core.node_parser import SentenceSplitter
-from llama_index.core import Settings
-# Create your views here.
+from llama_index.core import ChatPromptTemplate
+from llama_index.core.llms import ChatMessage,MessageRole
+from django.conf import settings
+from llama_index.llms.together import TogetherLLM
 import os
 from django.http import JsonResponse, HttpResponse
 import PyPDF2
+import shutil
+from django.utils.text import slugify
+
 
 
 def home(request):
@@ -18,75 +25,214 @@ def home(request):
 
 def doc_view(request):
 
+
     return render(request, 'doc.html')
+
+def split_pdf_by_page(pdf_file, output_folder):
+    # Delete the output folder if it exists
+    if os.path.exists(output_folder):
+        shutil.rmtree(output_folder)
+
+    # Create the output folder
+    os.makedirs(output_folder)
+
+    pdf_reader = PyPDF2.PdfReader(pdf_file)
+    num_pages = len(pdf_reader.pages)
+    pdf_names = []
+
+    for page_num in range(num_pages):
+        pdf_writer = PyPDF2.PdfWriter()
+        pdf_writer.add_page(pdf_reader.pages[page_num])
+        output_file_path = os.path.join(output_folder, f'page_{page_num + 1}.pdf')
+        pdf_names.append(f'page_{page_num + 1}')
+        with open(output_file_path, 'wb') as output_pdf:
+            pdf_writer.write(output_pdf)
+
+    return pdf_names
+# def build_document_summary_index(city_docs):
+#     # Initialize the embedding model
+#     lc_embed_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2")
+#     embed_model = LangchainEmbedding(lc_embed_model)
+#     Settings.embed_model = embed_model
+#     splitter = SentenceSplitter(chunk_size=1000)
+#     response_synthesizer = get_response_synthesizer(
+#         response_mode="tree_summarize", use_async=True
+#     )
+#
+#     # Initialize the LLM model
+#     llm = TogetherLLM(
+#         model="togethercomputer/llama-2-70b-chat",
+#         api_key="96557b956acf6073510ee7e4abadc1c7863626e75278a0eaf9a747875af30604"
+#     )
+#     Settings.llm = llm
+#     # Settings.llm = TogetherLLMSettings(
+#     #     model="togethercomputer/llama-2-70b-chat",
+#     #     api_key="your_api_key_here"
+#     # )
+#     # from llama_index.core import Settings
+#     Settings.context_window = 4000
+#
+#     # Build the document summary index from the city_docs list
+#     doc_summary_index = DocumentSummaryIndex.from_documents(
+#         city_docs,
+#         llm=llm,
+#         transformations=[splitter],
+#         response_synthesizer=response_synthesizer,
+#         show_progress=True
+#     )
+#
+#     return doc_summary_index
+# def build_document_summary_index(city_docs):
+#     # Initialize the embedding model
+#     embed_model = LangchainEmbedding(HuggingFaceEmbeddings(model_name=settings.SENTENCE_EMBEDDING_MODEL))
+#     settings.Settings.embed_model = embed_model
+#
+#     # Initialize the LLM model
+#     llm = TogetherLLM(model=settings.LLM_MODEL, api_key=settings.LLM_API_KEY)
+#     settings.Settings.llm = llm
+#
+#     # Set context window size
+#     settings.Settings.context_window = settings.CONTEXT_WINDOW_SIZE
+#
+#     # Initialize the splitter
+#     splitter = SentenceSplitter(chunk_size=settings.SPLITTER_CHUNK_SIZE)
+#
+#     # Initialize the response synthesizer
+#     response_synthesizer = get_response_synthesizer(response_mode="tree_summarize", use_async=True)
+#
+#     # Build the document summary index
+#     doc_summary_index = DocumentSummaryIndex.from_documents(
+#         city_docs,
+#         llm=llm,
+#         transformations=[splitter],
+#         response_synthesizer=response_synthesizer,
+#         show_progress=True
+#     )
+#
+#     return doc_summary_index
+
+def build_document_summary_index(city_docs):
+    # Initialize the embedding model
+    embed_model = LangchainEmbedding(HuggingFaceEmbeddings(model_name=settings.SENTENCE_EMBEDDING_MODEL))
+    settings.embed_model = embed_model
+
+    # Initialize the LLM model
+    llm = TogetherLLM(model=settings.LLM_MODEL, api_key=settings.LLM_API_KEY)
+    settings.llm = llm
+
+    # Set context window size
+    settings.context_window = settings.CONTEXT_WINDOW_SIZE
+
+    # Initialize the splitter
+    splitter = SentenceSplitter(chunk_size=settings.SPLITTER_CHUNK_SIZE)
+
+    # Initialize the response synthesizer
+    response_synthesizer = get_response_synthesizer(response_mode="tree_summarize", use_async=True)
+
+    # Build the document summary index
+    doc_summary_index = DocumentSummaryIndex.from_documents(
+        city_docs,
+        llm=llm,
+        transformations=[splitter],
+        response_synthesizer=response_synthesizer,
+        show_progress=True
+    )
+
+    return doc_summary_index
+
+def process_user_input(user_input, doc_summary_index):
+    if user_input:
+        # Prepare chat message template and query
+        print(user_input)
+        chat_text_qa_msgs = [
+            ChatMessage(
+                role=MessageRole.SYSTEM,
+                content=(
+                    "Summarize the documents.\n"
+                    "Always answer the query using the provided context information, "
+                ),
+            ),
+            ChatMessage(
+                role=MessageRole.USER,
+                content=(
+                    "Context information is below.\n"
+                    "---------------------\n"
+                    "{context_str}\n"
+                    "---------------------\n"
+                    f"Given the context information, Provide a summary to the document {user_input} .\n"
+                ),
+            ),
+        ]
+        text_qa_template = ChatPromptTemplate(chat_text_qa_msgs)
+        query_2 = "summarize the   message from CFO section with the context relevant for Financial Performance"  # Use user input as part of the query
+
+        # Get response from document summary index
+        response__2 = doc_summary_index.as_query_engine(text_qa_template=text_qa_template).query(query_2)
+        print(response__2)
+
+        return response__2
+    else:
+        return None
+
+def process_input(request):
+    if request.method == 'POST':
+        user_input = request.POST.get('user_input', '')
+
+        # Redirect to the process_file view function while passing the user_input as a query parameter
+        return redirect('process_file', user_input=user_input)
 def process_file(request):
     if request.method == 'POST' and request.FILES.get('pdf_file'):
-        # Handle the uploaded file here
-        # For example, you can save it to a folder or process it in some way
+        # Get the uploaded PDF file
         pdf_file = request.FILES['pdf_file']
-        # Process the file...
 
-        # Redirect to the doc_chat.html page
-        return redirect('doc_chat')
-    else:
-        return HttpResponse('Invalid request or no file provided')
+        # Define the output folder where the split PDF pages will be saved
+        output_folder = 'output_folder'
 
-def doc_chat(request):
+        # Create the output folder if it doesn't exist
+        if not os.path.exists(output_folder):
+            os.makedirs(output_folder)
+
+        # Call the function to split the PDF by pages
+        # split_pdf_by_page(pdf_file, output_folder)
+        city_docs = []
+        output_folder = 'output_folder'  # Define the output folder
+
+        # Call the function to split the PDF by pages
+        pdf_names = split_pdf_by_page(pdf_file, output_folder)
+        print(pdf_names)
+
+        # Load the split PDF files
+        for wiki_title in pdf_names:
+            # Load each split PDF file
+            docs = SimpleDirectoryReader(
+                input_files=[f"{output_folder}/{wiki_title}.pdf"]  # Use the output_folder path
+            ).load_data()
+
+            # Set the doc_id for each document
+            for doc in docs:
+                doc.doc_id = wiki_title
+
+            # Extend the city_docs list with the loaded documents
+            city_docs.extend(docs)
+
+        doc_summary_index = build_document_summary_index(city_docs)
+        doc_summary_index.storage_context.persist("index")
+
+        user_input = request.GET.get('user_input', '')
+
+        # Now you have access to the user_input variable, you can print it or use it as needed
+        print("User input:", user_input)
+        return render(request, 'doc_chat.html', {'user_input': user_input})
+
+
+        # Render the HTML template without response data if no user input or if the request method is not POST
     return render(request, 'doc_chat.html')
 
 
-# def split_pdf(request):
-#     if request.method == 'POST' and request.FILES.get('pdf_file'):
-#         pdf_file = request.FILES['pdf_file']
-#         output_folder = 'output_folder1'
-#
-#         if not os.path.exists(output_folder):
-#             os.makedirs(output_folder)
-#
-#         try:
-#             split_pdf_by_page(pdf_file, output_folder)
-#             return JsonResponse({'message': 'PDF splitting successful'})
-#         except Exception as e:
-#             return JsonResponse({'error': str(e)}, status=500)
-#
-#     return JsonResponse({'error': 'Invalid request or no PDF file provided'}, status=400)
-#
-# def split_pdf_by_page(pdf_file, output_folder):
-#     pdf_reader = PyPDF2.PdfFileReader(pdf_file)
-#     num_pages = pdf_reader.numPages
-#
-#     for page_num in range(num_pages):
-#         pdf_writer = PyPDF2.PdfFileWriter()
-#         pdf_writer.add_page(pdf_reader.getPage(page_num))
-#         output_file_path = os.path.join(output_folder, f'page_{page_num + 1}.pdf')
-#         with open(output_file_path, 'wb') as output_pdf:
-#             pdf_writer.write(output_pdf)
-#
-# def split_pdf(request):
-#     pdf_file_path = 'example.pdf'  # Path to the existing PDF file in the project directory
-#     output_folder = 'output_folder1'
-#
-#     if not os.path.exists(pdf_file_path):
-#         return JsonResponse({'error': 'PDF file not found'}, status=404)
-#
-#     if not os.path.exists(output_folder):
-#         os.makedirs(output_folder)
-#
-#     try:
-#         split_pdf_by_page(pdf_file_path, output_folder)
-#         return JsonResponse({'message': 'PDF splitting successful'})
-#     except Exception as e:
-#         return JsonResponse({'error': str(e)}, status=500)
-#
-#
-# def split_pdf_by_page(pdf_path, output_folder):
-#     with open(pdf_path, 'rb') as pdf_file:
-#         pdf_reader = PyPDF2.PdfReader(pdf_file)
-#         num_pages = len(pdf_reader.pages)
-#
-#         for page_num in range(num_pages):
-#             pdf_writer = PyPDF2.PdfWriter()
-#             pdf_writer.add_page(pdf_reader.pages[page_num])
-#             output_file_path = os.path.join(output_folder, f'page_{page_num + 1}.pdf')
-#             with open(output_file_path, 'wb') as output_pdf:
-#                 pdf_writer.write(output_pdf)
+
+def doc_chat(request,response__2=None):
+    # return render(request, 'doc_chat.html')
+    print("Response:", response__2)
+    return render(request, 'doc_chat.html', {'response_2': response__2})
+
+

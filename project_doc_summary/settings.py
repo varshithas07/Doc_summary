@@ -11,6 +11,10 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 """
 import os
 from pathlib import Path
+from llama_index.core import Settings
+from llama_index.embeddings.langchain import LangchainEmbedding
+from llama_index.llms.together import TogetherLLM
+from langchain.embeddings import HuggingFaceEmbeddings
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -128,3 +132,25 @@ STATICFILES_DIRS = [
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+# LLM model settings
+LLM_MODEL = "togethercomputer/llama-2-70b-chat"
+LLM_API_KEY = "96557b956acf6073510ee7e4abadc1c7863626e75278a0eaf9a747875af30604"
+
+# Sentence embedding model
+SENTENCE_EMBEDDING_MODEL = "sentence-transformers/all-mpnet-base-v2"
+
+# Chunk size for sentence splitter
+SPLITTER_CHUNK_SIZE = 1000
+
+# Context window size
+CONTEXT_WINDOW_SIZE = 4000
+# Initialize the embedding model
+embed_model = LangchainEmbedding(HuggingFaceEmbeddings(model_name=SENTENCE_EMBEDDING_MODEL))
+Settings.embed_model = embed_model
+
+# Initialize the LLM model
+llm = TogetherLLM(model=LLM_MODEL, api_key=LLM_API_KEY)
+Settings.llm = llm
+
+# Set context window size
+Settings.context_window = CONTEXT_WINDOW_SIZE
