@@ -10,10 +10,17 @@ from llama_index.core.llms import ChatMessage,MessageRole
 from django.conf import settings
 from llama_index.llms.together import TogetherLLM
 import os
-from django.http import JsonResponse, HttpResponse
+from llama_index.core.indices.document_summary import (
+    DocumentSummaryIndexLLMRetriever,
+)
+from llama_index.core import VectorStoreIndex
+from llama_index.core.query_engine import RetrieverQueryEngine
 import PyPDF2
 import shutil
-from django.utils.text import slugify
+from llama_index.core import load_index_from_storage
+from llama_index.core import StorageContext
+
+
 
 
 
@@ -181,53 +188,91 @@ def process_input(request):
         # Redirect to the process_file view function while passing the user_input as a query parameter
         return redirect('process_file', user_input=user_input)
 def process_file(request):
-    if request.method == 'POST' and request.FILES.get('pdf_file'):
-        # Get the uploaded PDF file
-        pdf_file = request.FILES['pdf_file']
+    doc_summary_index = None
+    user_input = None
 
-        # Define the output folder where the split PDF pages will be saved
-        output_folder = 'output_folder'
-
-        # Create the output folder if it doesn't exist
-        if not os.path.exists(output_folder):
-            os.makedirs(output_folder)
-
-        # Call the function to split the PDF by pages
-        # split_pdf_by_page(pdf_file, output_folder)
-        city_docs = []
-        output_folder = 'output_folder'  # Define the output folder
-
-        # Call the function to split the PDF by pages
-        pdf_names = split_pdf_by_page(pdf_file, output_folder)
-        print(pdf_names)
-
-        # Load the split PDF files
-        for wiki_title in pdf_names:
-            # Load each split PDF file
-            docs = SimpleDirectoryReader(
-                input_files=[f"{output_folder}/{wiki_title}.pdf"]  # Use the output_folder path
-            ).load_data()
-
-            # Set the doc_id for each document
-            for doc in docs:
-                doc.doc_id = wiki_title
-
-            # Extend the city_docs list with the loaded documents
-            city_docs.extend(docs)
-
-        doc_summary_index = build_document_summary_index(city_docs)
-        doc_summary_index.storage_context.persist("index")
-
-        user_input = request.GET.get('user_input', '')
-
-        # Now you have access to the user_input variable, you can print it or use it as needed
-        print("User input:", user_input)
-        return render(request, 'doc_chat.html', {'user_input': user_input})
+    if request.method == 'POST':
+        if request.FILES.get('pdf_file'):
+            # Handle PDF file upload
+            pdf_file = request.FILES['pdf_file']
+            output_folder = 'output_folder'
+            if not os.path.exists(output_folder):
+                os.makedirs(output_folder)
+            city_docs = []
+            output_folder = 'output_folder'
+            pdf_names = split_pdf_by_page(pdf_file, output_folder)
+            for wiki_title in pdf_names:
+                docs = SimpleDirectoryReader(
+                    input_files=[f"{output_folder}/{wiki_title}.pdf"]
+                ).load_data()
+                for doc in docs:
+                    doc.doc_id = wiki_title
+                city_docs.extend(docs)
+            doc_summary_index = build_document_summary_index(city_docs)
+            doc_summary_index.storage_context.persist("index")
+            storage_context = StorageContext.from_defaults(persist_dir="index")
+            doc_summary_index = load_index_from_storage(storage_context)
 
 
-        # Render the HTML template without response data if no user input or if the request method is not POST
+
+        elif request.POST.get('user_input'):
+            # Handle user input
+            user_input = request.POST.get('user_input', '')
+
+
+            # Now you have access to the user_input variable, you can print it or use it as needed
+            print("User input:", user_input)
+            print(doc_summary_index)
+            if user_input:
+                doc_summary_index = build_document_summary_index(city_docs)
+                doc_summary_index.storage_context.persist("index")
+                storage_context = StorageContext.from_defaults(persist_dir="index")
+                doc_summary_index = load_index_from_storage(storage_context)
+                retriever = DocumentSummaryIndexLLMRetriever(
+                    doc_summary_index,
+                    choice_top_k=1,
+                )
+                response_synthesizer = get_response_synthesizer(response_mode="tree_summarize")
+
+                chat_text_qa_msgs = [
+                    ChatMessage(
+                        role=MessageRole.SYSTEM,
+                        content=(
+                            "Summarize the documents.\n"
+                            "Always answer the query using the provided context information, "
+                        ),
+                    ),
+                    ChatMessage(
+                        role=MessageRole.USER,
+                        content=(
+                            "Context information is below.\n"
+                            "---------------------\n"
+                            "{context_str}\n"
+                            "---------------------\n"
+                            "Given the context information, Provide a summary to the document .\n"
+                        ),
+                    ),
+                ]
+
+
+                text_qa_template = ChatPromptTemplate(chat_text_qa_msgs)
+                query_2 = f"""{user_input}
+                   list:list any 5 important points
+                   background:Explain background with financial context
+                   provide data points with milestone"""
+                query_engine = RetrieverQueryEngine(
+                    retriever=retriever,
+                    response_synthesizer=response_synthesizer
+                )
+                response__2 = doc_summary_index.as_query_engine(text_qa_template=text_qa_template).query(query_2)
+                print(response__2,"response")
+
+                # Get response from document summary index
+                return render(request, 'doc_chat.html', {'response_2': response__2})
+
+    # Render the HTML template without response data if the request method is not POST or if no file or user input is provided
+
     return render(request, 'doc_chat.html')
-
 
 
 def doc_chat(request,response__2=None):

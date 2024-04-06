@@ -67,7 +67,7 @@
                 <button class="btn btn-primary button_file" id="add-new-file-btn" style ="margin-left: 900px; background: #30494c; border-color: black;">Replace File</button>
             </div>
           <div class="m-auto" id="user-input-container" style="position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);">
-    <form id="file-upload-form" action="{% url 'process_input' %}" method="post">
+    <form id="file-upload-form" action="{% url 'process_file' %}" method="post">
         {% csrf_token %}
         <textarea id="user-input" name="user_input" placeholder="Type your message..."></textarea>
         <button id="arrow-button" type="submit"><i class="fa fa-arrow-up" aria-hidden="true"></i></button>
