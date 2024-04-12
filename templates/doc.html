@@ -12,6 +12,16 @@
     <link rel="stylesheet" href="https://hrtest499li.azurewebsites.net/static/style.css">
     <title>Athena Chat</title>
     <style>
+        .nav-design .nav-link {
+            color: #fff; /* Set text color to white */
+        }
+
+        .nav-design .nav-link.active {
+            font-weight: bold; /* Highlight the active link */
+            color: black; /* Set text color for the active link to yellow */
+            background-color: #ffffff;
+            border-radius: 10px;
+        }
         #drop_zone {
           border: 2px dashed #ccc;
           border-radius: 5px;
@@ -29,6 +39,19 @@
         #drop_zone.hover {
           border-color: #333;
           color: #333;
+        }
+
+        .prompt-message {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: white; /* Changed background color to white */
+            color: black; /* Changed text color to black */
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 9999;
+            display: none;
         }
     </style>
 </head>
@@ -64,11 +87,13 @@
                     <input type="file" id="file_input" name="pdf_file" style="display: none;" onchange="submitForm()">
                 </form>
             </div>
+            <div class="prompt-message" id="uploadMessage">Document uploaded successfully! </div>
         </div>
     </div>
 </div>
 <script>
     var dropZone = document.getElementById('drop_zone');
+    var uploadMessage = document.getElementById('uploadMessage');
 
     dropZone.addEventListener('dragenter', function (e) {
         e.stopPropagation();
@@ -89,6 +114,10 @@
 
     function submitForm() {
         document.getElementById("upload").submit();
+        uploadMessage.style.display = 'block';
+        setTimeout(function() {
+            uploadMessage.style.display = 'none';
+        }, 3000); // Hide after 3 seconds
     }
 </script>
 </body>

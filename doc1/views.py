@@ -13,10 +13,12 @@ import os
 from llama_index.core.indices.document_summary import (
     DocumentSummaryIndexLLMRetriever,
 )
-from llama_index.core import VectorStoreIndex
+import re
 from llama_index.core.query_engine import RetrieverQueryEngine
+from django.http import HttpResponseRedirect
 import PyPDF2
 import shutil
+from django.http import HttpResponseServerError
 from llama_index.core import load_index_from_storage
 from llama_index.core import StorageContext
 
@@ -56,67 +58,7 @@ def split_pdf_by_page(pdf_file, output_folder):
             pdf_writer.write(output_pdf)
 
     return pdf_names
-# def build_document_summary_index(city_docs):
-#     # Initialize the embedding model
-#     lc_embed_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2")
-#     embed_model = LangchainEmbedding(lc_embed_model)
-#     Settings.embed_model = embed_model
-#     splitter = SentenceSplitter(chunk_size=1000)
-#     response_synthesizer = get_response_synthesizer(
-#         response_mode="tree_summarize", use_async=True
-#     )
-#
-#     # Initialize the LLM model
-#     llm = TogetherLLM(
-#         model="togethercomputer/llama-2-70b-chat",
-#         api_key="96557b956acf6073510ee7e4abadc1c7863626e75278a0eaf9a747875af30604"
-#     )
-#     Settings.llm = llm
-#     # Settings.llm = TogetherLLMSettings(
-#     #     model="togethercomputer/llama-2-70b-chat",
-#     #     api_key="your_api_key_here"
-#     # )
-#     # from llama_index.core import Settings
-#     Settings.context_window = 4000
-#
-#     # Build the document summary index from the city_docs list
-#     doc_summary_index = DocumentSummaryIndex.from_documents(
-#         city_docs,
-#         llm=llm,
-#         transformations=[splitter],
-#         response_synthesizer=response_synthesizer,
-#         show_progress=True
-#     )
-#
-#     return doc_summary_index
-# def build_document_summary_index(city_docs):
-#     # Initialize the embedding model
-#     embed_model = LangchainEmbedding(HuggingFaceEmbeddings(model_name=settings.SENTENCE_EMBEDDING_MODEL))
-#     settings.Settings.embed_model = embed_model
-#
-#     # Initialize the LLM model
-#     llm = TogetherLLM(model=settings.LLM_MODEL, api_key=settings.LLM_API_KEY)
-#     settings.Settings.llm = llm
-#
-#     # Set context window size
-#     settings.Settings.context_window = settings.CONTEXT_WINDOW_SIZE
-#
-#     # Initialize the splitter
-#     splitter = SentenceSplitter(chunk_size=settings.SPLITTER_CHUNK_SIZE)
-#
-#     # Initialize the response synthesizer
-#     response_synthesizer = get_response_synthesizer(response_mode="tree_summarize", use_async=True)
-#
-#     # Build the document summary index
-#     doc_summary_index = DocumentSummaryIndex.from_documents(
-#         city_docs,
-#         llm=llm,
-#         transformations=[splitter],
-#         response_synthesizer=response_synthesizer,
-#         show_progress=True
-#     )
-#
-#     return doc_summary_index
+
 
 def build_document_summary_index(city_docs):
     # Initialize the embedding model
@@ -147,49 +89,71 @@ def build_document_summary_index(city_docs):
 
     return doc_summary_index
 
-def process_user_input(user_input, doc_summary_index):
-    if user_input:
-        # Prepare chat message template and query
-        print(user_input)
-        chat_text_qa_msgs = [
-            ChatMessage(
-                role=MessageRole.SYSTEM,
-                content=(
-                    "Summarize the documents.\n"
-                    "Always answer the query using the provided context information, "
-                ),
-            ),
-            ChatMessage(
-                role=MessageRole.USER,
-                content=(
-                    "Context information is below.\n"
-                    "---------------------\n"
-                    "{context_str}\n"
-                    "---------------------\n"
-                    f"Given the context information, Provide a summary to the document {user_input} .\n"
-                ),
-            ),
-        ]
-        text_qa_template = ChatPromptTemplate(chat_text_qa_msgs)
-        query_2 = "summarize the   message from CFO section with the context relevant for Financial Performance"  # Use user input as part of the query
 
-        # Get response from document summary index
-        response__2 = doc_summary_index.as_query_engine(text_qa_template=text_qa_template).query(query_2)
-        print(response__2)
 
-        return response__2
-    else:
-        return None
 
-def process_input(request):
-    if request.method == 'POST':
-        user_input = request.POST.get('user_input', '')
 
-        # Redirect to the process_file view function while passing the user_input as a query parameter
-        return redirect('process_file', user_input=user_input)
+
+doc_summary_index = None
+city_docs = []
+
+def formatted_answer(answer):
+    lines = answer.split('\n')
+    formatted_lines = []
+    in_list = False
+    list_type = None
+
+    for line in lines:
+        # Check for numbered list
+        numbered_match = re.match(r'^(\d+\.\s)(.+)', line)
+        # Check for asterisk list
+        asterisk_match = re.match(r'^(\*\s)(.+)', line)
+        # Split asterisk list items that are on the same line
+        asterisk_items = re.findall(r'\*\s(.+?)(?=(\*\s|$))', line)
+
+        if numbered_match:
+            if not in_list or list_type != 'ol':
+                if in_list:  # Close the previous list
+                    formatted_lines.append('</ul>' if list_type == 'ul' else '</ol>')
+                formatted_lines.append('<ol>')
+                in_list = True
+                list_type = 'ol'
+            formatted_lines.append(f'<li>{numbered_match.group(2).strip()}</li>')
+
+        elif asterisk_match or asterisk_items:
+            if not in_list or list_type != 'ul':
+                if in_list:  # Close the previous list
+                    formatted_lines.append('</ol>' if list_type == 'ol' else '</ul>')
+                formatted_lines.append('<ul>')
+                in_list = True
+                list_type = 'ul'
+            if asterisk_items:
+                for item, _ in asterisk_items:
+                    formatted_lines.append(f'<li>{item.strip()}</li>')
+            else:
+                formatted_lines.append(f'<li>{asterisk_match.group(2).strip()}</li>')
+
+        else:
+            if in_list:  # Close the previous list
+                formatted_lines.append('</ul>' if list_type == 'ul' else '</ol>')
+                in_list = False
+            # Wrap non-list lines in paragraphs or handle them appropriately
+            formatted_lines.append(f'<p>{line.strip()}</p>')
+
+    # Close any open list tags
+    if in_list:
+        formatted_lines.append('</ul>' if list_type == 'ul' else '</ol>')
+
+    # Combine all formatted lines
+    formatted_output = ''.join(formatted_lines)
+
+    return formatted_output
+
+query_history=[]
 def process_file(request):
-    doc_summary_index = None
-    user_input = None
+    global doc_summary_index
+    global city_docs
+    global query_history
 
     if request.method == 'POST':
         if request.FILES.get('pdf_file'):
@@ -210,74 +174,63 @@ def process_file(request):
                 city_docs.extend(docs)
             doc_summary_index = build_document_summary_index(city_docs)
             doc_summary_index.storage_context.persist("index")
-            storage_context = StorageContext.from_defaults(persist_dir="index")
-            doc_summary_index = load_index_from_storage(storage_context)
-
-
+            return render(request, 'doc_chat.html')
 
         elif request.POST.get('user_input'):
             # Handle user input
             user_input = request.POST.get('user_input', '')
-
-
-            # Now you have access to the user_input variable, you can print it or use it as needed
-            print("User input:", user_input)
-            print(doc_summary_index)
+            # query_history=[]
             if user_input:
-                doc_summary_index = build_document_summary_index(city_docs)
-                doc_summary_index.storage_context.persist("index")
-                storage_context = StorageContext.from_defaults(persist_dir="index")
-                doc_summary_index = load_index_from_storage(storage_context)
-                retriever = DocumentSummaryIndexLLMRetriever(
-                    doc_summary_index,
-                    choice_top_k=1,
-                )
-                response_synthesizer = get_response_synthesizer(response_mode="tree_summarize")
+               try:
+                   retriever = DocumentSummaryIndexLLMRetriever(
+                       doc_summary_index,
+                       choice_top_k=3,
+                   )
+                   response_synthesizer = get_response_synthesizer(response_mode="tree_summarize")
 
-                chat_text_qa_msgs = [
-                    ChatMessage(
-                        role=MessageRole.SYSTEM,
-                        content=(
-                            "Summarize the documents.\n"
-                            "Always answer the query using the provided context information, "
-                        ),
-                    ),
-                    ChatMessage(
-                        role=MessageRole.USER,
-                        content=(
-                            "Context information is below.\n"
-                            "---------------------\n"
-                            "{context_str}\n"
-                            "---------------------\n"
-                            "Given the context information, Provide a summary to the document .\n"
-                        ),
-                    ),
-                ]
+                   chat_text_qa_msgs = [
+                       ChatMessage(
+                           role=MessageRole.SYSTEM,
+                           content=(
+                               "Summarize the documents.\n"
+                               "Always answer the query using the provided context information, "
+                           ),
+                       ),
+                       ChatMessage(
+                           role=MessageRole.USER,
+                           content=(
+                               "Context information is below.\n"
+                               "---------------------\n"
+                               "{context_str}\n"
+                               "---------------------\n"
+                              # "Given the context information, Provide a summary to the document .\n"
+                               " Please write a passage to answer the question\n"
+                               "Try to include as many key details as possible.\n"
 
 
-                text_qa_template = ChatPromptTemplate(chat_text_qa_msgs)
-                query_2 = f"""{user_input}
-                   list:list any 5 important points
-                   background:Explain background with financial context
-                   provide data points with milestone"""
-                query_engine = RetrieverQueryEngine(
-                    retriever=retriever,
-                    response_synthesizer=response_synthesizer
-                )
-                response__2 = doc_summary_index.as_query_engine(text_qa_template=text_qa_template).query(query_2)
-                print(response__2,"response")
+                           ),
+                       ),
+                   ]
 
-                # Get response from document summary index
-                return render(request, 'doc_chat.html', {'response_2': response__2})
-
-    # Render the HTML template without response data if the request method is not POST or if no file or user input is provided
-
+                   text_qa_template = ChatPromptTemplate(chat_text_qa_msgs)
+                   query_2 = f"""{user_input} """
+                   query_engine = RetrieverQueryEngine(
+                       retriever=retriever,
+                       response_synthesizer=response_synthesizer
+                   )
+                   response__2 = doc_summary_index.as_query_engine(text_qa_template=text_qa_template).query(query_2)
+                   answer = formatted_answer(str(response__2))
+                   query_history.append({"question": user_input, "answer": answer})
+                   return render(request, 'doc_chat.html', {'query_history': query_history})
+               except AttributeError:
+                   # Handle the case when doc_summary_index is None
+                   return HttpResponseServerError("something went wrong. Please retry uploading the PDF.")
+    # Render a response for the GET request
     return render(request, 'doc_chat.html')
 
-
-def doc_chat(request,response__2=None):
+def doc_chat(request):
     # return render(request, 'doc_chat.html')
-    print("Response:", response__2)
-    return render(request, 'doc_chat.html', {'response_2': response__2})
+
+    return render(request, 'doc_chat.html')
 
 
